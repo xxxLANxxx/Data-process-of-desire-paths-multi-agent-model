@@ -1,0 +1,454 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Sat Jul  6 20:49:31 2024
+
+@author: CRL-louis
+"""
+
+
+%matplotlib qt
+
+import os
+import seaborn as sns
+import pandas as pd
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+import numpy as np
+import matplotlib.patches as mpatch
+from scipy.optimize import curve_fit
+from sklearn.metrics import r2_score, mean_squared_error
+
+
+# Define model functions
+def linear(x, a, b):
+    return a * x + b
+
+def exponential(x, a, b):
+    return a * np.exp(b * x)
+
+def logarithmic(x, a, b):
+    return a * np.log(x) + b
+
+def polynomial(x, *params):
+    return sum(p * x**i for i, p in enumerate(params))
+
+def sinusoidal(x, a, b, c, d):
+    return a * np.sin(b * x + c) + d
+
+def reciprocal(x, a, b):
+    return a / x + b
+
+def generalized_reciprocal(x, a, c, b):
+    return a / (x + c) + b
+
+def second_reciprocal(x, a, b, c):
+    return a / x + b / x**2 + c
+
+def second_generalized_reciprocal(x, a, c, b, d, e):
+    return a / (x + c) + b / (x + d)**2 + e
+
+
+def determineBestTrendModel(x, y, max_degree, tolerance):
+    
+    degree = 1
+    best_poly_degree = 1
+    best_poly_r2 = -np.inf
+    
+    while degree <= max_degree:
+        params, _ = curve_fit(lambda x, *params: polynomial(x, *params), x, y, p0=[1] * (degree + 1), maxfev=100000)
+        y_pred = polynomial(x, *params)
+        r2 = r2_score(y, y_pred)
+        if r2 - best_poly_r2 < tolerance:
+            break
+        best_poly_r2 = r2
+        best_poly_degree = degree
+        degree += 1
+
+    # Add the best polynomial model to the models dictionary
+    models[f'Polynomial (degree {best_poly_degree})'] = (lambda x, *params: polynomial(x, *params), best_poly_degree + 1)
+
+    best_model = None
+    best_r2 = -np.inf
+    best_rmse = np.inf
+
+    for name, (model, n_params) in models.items():
+        # Fit model
+        params, _ = curve_fit(model, x, y, p0=[1] * n_params, maxfev=1000000)
+        
+        # Calculate predicted values
+        y_pred = model(x, *params)
+        
+        # Calculate R^2 and RMSE
+        r2 = r2_score(y, y_pred)
+        rmse = np.sqrt(mean_squared_error(y, y_pred))
+        
+        # Select best model based on R^2 or RMSE
+        if r2 > best_r2:
+            best_model = (name, model, params, r2, rmse)
+            best_r2 = r2
+            best_rmse = rmse
+
+    # Plot the best trend line
+    best_name, best_model_func, best_params, best_r2, best_rmse = best_model
+    y_trend = best_model_func(x, *best_params)
+    
+    # Generate and display the equation of the best-fitting model
+    if best_name == 'Linear':
+        equation = f'y = {best_params[0]:.4f}x + {best_params[1]:.2f}'
+    elif best_name == 'Exponential':
+        equation = f'y = {best_params[0]:.2f} * e^({best_params[1]:.2f}x)'
+    # elif best_name == 'Logarithmic':
+    #     equation = f'y = {best_params[0]:.2f} * ln(x) + {best_params[1]:.2f}'
+    elif 'Polynomial' in best_name:
+        terms = [f'{p:.2f}x^{i}' if i > 0 else f'{p:.2f}' for i, p in enumerate(best_params)]
+        equation = 'y = ' + ' + '.join(terms)
+    # elif best_name == 'Sinusoidal':
+    #     equation = f'y = {best_params[0]:.2f} * sin({best_params[1]:.2f}x + {best_params[2]:.2f}) + {best_params[3]:.2f}'
+    elif best_name == 'Reciprocal':
+        equation = f'y = {best_params[0]:.2f} / x + {best_params[1]:.2f}'
+    elif best_name == 'Second Reciprocal':
+        equation = f'y = {best_params[0]:.2f} / x + {best_params[1]:.2f} / x^2 + {best_params[2]:.2f}'
+    elif best_name == 'Generalized Reciprocal':
+        equation = f'y = {best_params[0]:.2f} / (x + {best_params[1]:.2f}) + {best_params[2]:.2f}'
+    elif best_name == 'Second Generalized Reciprocal':
+        equation = f'y = {best_params[0]:.2f} / (x + {best_params[1]:.2f}) + {best_params[2]:.2f} / (x + {best_params[3]:.2f})^2 + {best_params[4]:.2f}'
+    
+    # Print the best model's equation and metrics
+    print("##############################################################################")
+    print(f"Best model: {best_name}")
+    print(f"Parameters: {best_params}")
+    print(f"R^2: {best_r2}")
+    print(f"RMSE: {best_rmse}")
+    print(f"Equation: {equation}")
+    
+    return x, y_trend, equation, best_r2, best_name
+
+
+def plotGlobalNetworkData(x, y, x_trend, y_trend, equation, best_r2, best_name, bPlotTrendCurve, bRelativeResults = 1):
+    
+    
+    plt.plot(x, y, marker='+', linestyle='-', color='b')
+
+    if (bPlotTrendCurve):
+        if (bRelativeResults):
+            plt.plot(x_trend, y_trend / max(y_trend), color='green', label=f'{best_name} trend (R^2 = {best_r2:.2f})', linewidth = 2)
+        else:
+            plt.plot(x_trend, y_trend, color='green', label=f'{best_name} trend (R^2 = {best_r2:.2f})', linewidth = 2)
+        plt.text(0.95, 0.4, equation, transform=plt.gca().transAxes, fontsize=12, 
+              verticalalignment='center', horizontalalignment='right', 
+              bbox=dict(facecolor='white', edgecolor='none', pad=1))
+        
+    
+    plt.grid(True)
+    
+    plt.legend(loc = "center right")
+
+
+def generateGlobalNetworkResults(x, y, x_trend, y_trend, equation, best_r2, best_name, bPlotTrendCurve, bRelativeResults = 1):
+    
+    
+    plt.plot(x, y, marker='+', linestyle='-', color='b')
+        
+    if (bPlotTrendCurve):
+        if (bRelativeResults):
+            plt.plot(x_trend, y_trend / max(y_trend), color='green', label=f'{best_name} trend (R^2 = {best_r2:.2f})', linewidth = 2)
+        else:
+            plt.plot(x_trend, y_trend, color='green', label=f'{best_name} trend (R^2 = {best_r2:.2f})', linewidth = 2)
+        plt.text(0.95, 0.4, equation, transform=plt.gca().transAxes, fontsize=12, 
+              verticalalignment='center', horizontalalignment='right', 
+              bbox=dict(facecolor='white', edgecolor='none', pad=1))
+        
+    
+    plt.grid(True)
+    
+    plt.legend(loc = "center right")
+    
+
+plt.close('all')
+
+
+
+# Define models with their parameter counts
+models = {
+    'Linear': (linear, 2),
+    'Exponential': (exponential, 2),
+    # 'Logarithmic': (logarithmic, 2),
+    # 'Sinusoidal': (sinusoidal, 4)
+    'Reciprocal': (reciprocal, 2),
+    'Second Reciprocal': (second_reciprocal, 3),
+    'Generalized Reciprocal': (generalized_reciprocal, 3),
+    'Second Generalized Reciprocal': (second_generalized_reciprocal, 5)
+}
+
+
+
+
+# Import Data
+tot_cost_path = "CurrentData/totCostData.csv"  # Replace with your actual file path
+df_tot_cost = pd.read_csv(tot_cost_path)
+
+tot_cost_array = df_tot_cost.to_numpy()
+
+
+# Store Data in corresponding arrays
+gen_array = np.array(tot_cost_array[0:,0].astype(float))
+
+completeTravels_array = np.array(tot_cost_array[0:,1].astype(float))
+
+global_convergence_array = np.array(tot_cost_array[0:,2].astype(float))
+
+cost_infra_array = np.array(tot_cost_array[0:,3].astype(float))
+
+
+
+infra_cost_path = "CurrentData/infraTMData.csv"  # Replace with your actual file path
+df_infra_cost = pd.read_csv(infra_cost_path)
+
+infra_cost_array = df_infra_cost.to_numpy()
+
+gen_infra_array = np.array(infra_cost_array[0::5,0].astype(float))
+
+TM0_array = np.array(infra_cost_array[0::5,2].astype(float))
+TM1_array = np.array(infra_cost_array[1::5,2].astype(float))
+TM2_array = np.array(infra_cost_array[2::5,2].astype(float))
+TM3_array = np.array(infra_cost_array[3::5,2].astype(float))
+TM4_array = np.array(infra_cost_array[4::5,2].astype(float))
+
+
+
+TM0_percent = TM0_array / cost_infra_array * 100
+TM1_percent = TM1_array / cost_infra_array * 100
+TM2_percent = TM2_array / cost_infra_array * 100
+TM3_percent = TM3_array / cost_infra_array * 100
+TM4_percent = TM4_array / cost_infra_array * 100
+
+# TM0_percent[0] = 0
+# TM1_percent[0] = 0
+# TM2_percent[0] = 0
+# TM3_percent[0] = 0
+# TM4_percent[0] = 0
+
+
+TM_RGB_path = 'TM_RGB_RenderColors.xlsx'  # Replace with your actual file path
+df_RGB = pd.read_excel(TM_RGB_path)
+
+TM_RGB_array = df_RGB.to_numpy()
+
+
+colors = np.array(TM_RGB_array[:,1:].astype(float)) / 255.0
+
+
+pathUSB = "F:\TDU\Latex\Figures"
+pathPC = "CurrentData"
+
+plot_trend_curve = True
+
+
+max_degree = 2
+tolerance = 0.01
+fontsizeEPS = 19
+
+##########################################################################################################
+##########################################################################################################
+
+# Figure Complete Travels
+# Plot
+plt.figure(figsize=(8, 4))
+x_trend_trav, y_trend_trav, equation_trav, best_r2_trav, best_name_trav = determineBestTrendModel(gen_array, completeTravels_array / max(completeTravels_array), max_degree, tolerance)
+
+plotGlobalNetworkData(gen_array, completeTravels_array / max(completeTravels_array), x_trend_trav, y_trend_trav, equation_trav, best_r2_trav, best_name_trav, plot_trend_curve)
+
+plt.title('Complete Travels relative to direct route system through Generations')
+plt.xlabel('Generations')
+plt.ylabel('Complete Travels relative to direct route system')
+
+
+plt.savefig(pathPC + "/CompleteTravels.png", dpi=300, bbox_inches='tight')
+plt.savefig(pathUSB + '/CompleteTravels.png', dpi=300, bbox_inches='tight')
+
+plt.show()
+
+# EPS
+plt.figure(figsize=(8, 4))
+generateGlobalNetworkResults(gen_array, completeTravels_array / max(completeTravels_array), x_trend_trav, y_trend_trav, equation_trav, best_r2_trav, best_name_trav, plot_trend_curve)
+
+plt.xlabel('Generations', fontsize=fontsizeEPS)
+plt.ylabel('Complete Travels', fontsize=fontsizeEPS)
+
+plt.savefig(pathPC + "/CompleteTravels.eps", dpi=300, bbox_inches='tight')
+plt.savefig(pathUSB + '/CompleteTravels.eps', dpi=300, bbox_inches='tight')
+
+plt.close()
+
+
+# Figure Mean Complete Travels Per Agent
+# Plot
+plt.figure(figsize=(8, 4))
+x_trend_trav_per_agent, y_trend_trav_per_agent, equation_trav_per_agent, best_r2_trav_per_agent, best_name_trav_per_agent = determineBestTrendModel(gen_array, completeTravels_array, max_degree, tolerance)
+plotGlobalNetworkData(gen_array, completeTravels_array, x_trend_trav_per_agent, y_trend_trav_per_agent, equation_trav_per_agent, best_r2_trav_per_agent, best_name_trav_per_agent, plot_trend_curve)
+
+plt.title('Mean Complete Travels Per Agent through Generations')
+plt.xlabel('Generations')
+plt.ylabel('Mean Complete Travels Per Agent')
+
+plt.savefig(pathPC + "/MeanCompleteTravelsPerAgent.png", dpi=300, bbox_inches='tight')
+plt.savefig(pathUSB + '/MeanCompleteTravelsPerAgent.png', dpi=300, bbox_inches='tight')
+
+plt.show()
+
+# EPS
+plt.figure(figsize=(8, 4))
+generateGlobalNetworkResults(gen_array, completeTravels_array, x_trend_trav_per_agent, y_trend_trav_per_agent, equation_trav_per_agent, best_r2_trav_per_agent, best_name_trav_per_agent, plot_trend_curve)
+
+plt.xlabel('Generations', fontsize=fontsizeEPS)
+plt.ylabel('Mean Complete Travels per Agent', fontsize=fontsizeEPS)
+
+plt.savefig(pathPC + "/MeanCompleteTravelsPerAgent.eps", dpi=300, bbox_inches='tight')
+plt.savefig(pathUSB + '/MeanCompleteTravelsPerAgent.eps', dpi=300, bbox_inches='tight')
+
+plt.close()
+
+
+# Figure Global Convergence
+# Plot
+plt.figure(figsize=(8, 4))
+x_trend_conv, y_trend_conv, equation_conv, best_r2_conv, best_name_conv = determineBestTrendModel(gen_array, global_convergence_array, max_degree, tolerance)
+plotGlobalNetworkData(gen_array, global_convergence_array, x_trend_conv, y_trend_conv, equation_conv, best_r2_conv, best_name_conv, plot_trend_curve, 0)
+
+plt.title('Global Network Convergence through Generations')
+plt.xlabel('Generations')
+plt.ylabel('Network convergence')
+
+
+plt.savefig(pathPC + '/NetworkConvergence.png', dpi=300, bbox_inches='tight')
+plt.savefig(pathUSB + '/NetworkConvergence.png', dpi=300, bbox_inches='tight')
+
+plt.show()
+
+# EPS
+plt.figure(figsize=(8, 4))
+generateGlobalNetworkResults(gen_array, global_convergence_array, x_trend_conv, y_trend_conv, equation_conv, best_r2_conv, best_name_conv, plot_trend_curve, 0)
+
+plt.xlabel('Generations', fontsize=fontsizeEPS)
+plt.ylabel('Network convergence', fontsize=fontsizeEPS)
+
+plt.savefig(pathPC + '/NetworkConvergence.eps', dpi=300, bbox_inches='tight')
+plt.savefig(pathUSB + '/NetworkConvergence.eps', dpi=300, bbox_inches='tight')
+
+plt.close()
+
+
+# Figure Total Network Size
+# Plot
+plt.figure(figsize=(8, 4))
+x_trend_size, y_trend_size, equation_size, best_r2_size, best_name_size = determineBestTrendModel(gen_array[1::], cost_infra_array[1::] / max(cost_infra_array[1::]), max_degree, tolerance)
+plotGlobalNetworkData(gen_array[1::], cost_infra_array[1::] / max(cost_infra_array[1::]), x_trend_size, y_trend_size, equation_size, best_r2_size, best_name_size, plot_trend_curve)
+
+plt.title('Paths system size relative to direct route system through Generations')
+plt.xlabel('Generations')
+plt.ylabel('Paths system size relative to direct route system')
+
+plt.savefig(pathPC + '/NetworkSize.png', dpi=300, bbox_inches='tight')
+plt.savefig(pathUSB + '/NetworkSize.png', dpi=300, bbox_inches='tight')
+
+plt.show()
+
+# EPS
+plt.figure(figsize=(8, 4))
+generateGlobalNetworkResults(gen_array[1::], cost_infra_array[1::] / max(cost_infra_array[1::]), x_trend_size, y_trend_size, equation_size, best_r2_size, best_name_size, plot_trend_curve)
+
+plt.xlabel('Generations', fontsize=fontsizeEPS)
+plt.ylabel('Paths system size  relative to direct route system', fontsize=fontsizeEPS)
+
+plt.savefig(pathPC + '/NetworkSize.eps', dpi=300, bbox_inches='tight')
+plt.savefig(pathUSB + '/NetworkSize.eps', dpi=300, bbox_inches='tight')
+
+plt.close()
+
+
+# Stacked Area Chart TM infra cost
+# Plot
+plt.figure(figsize=(8, 4))
+
+# Plotting stacked areas
+plt.stackplot(gen_infra_array, TM0_array, TM1_array, TM2_array, TM3_array, TM4_array, labels=['NS < 0.2', '0.2 <= NS < 0.4', '0.4 <= NS < 0.6', '0.6 <= NS < 0.8', 'NS >= 0.8'], colors = colors)
+
+plt.xlim(2, len(TM0_percent))
+
+plt.xlabel('Generations')
+plt.ylabel('Path affordance count')
+plt.title('Stacked path affordance count through generations')
+plt.legend(loc='upper right')
+
+plt.savefig(pathPC + '/StackedPathAff.png', dpi=300, bbox_inches='tight')
+plt.savefig(pathUSB + '/StackedPathAff.png', dpi=300, bbox_inches='tight')
+
+plt.show()
+
+# EPS
+plt.figure(figsize=(8, 4))
+plt.stackplot(gen_infra_array, TM0_array, TM1_array, TM2_array, TM3_array, TM4_array, labels=['NS < 0.2', '0.2 <= NS < 0.4', '0.4 <= NS < 0.6', '0.6 <= NS < 0.8', 'NS >= 0.8'], colors = colors)
+
+plt.xlim(2, len(TM0_percent))
+
+plt.xlabel('Generations', fontsize=fontsizeEPS)
+plt.ylabel('Paths system size (in px)', fontsize=fontsizeEPS)
+
+plt.savefig(pathPC + '/StackedPathAff.eps', dpi=300, bbox_inches='tight')
+plt.savefig(pathUSB + '/StackedPathAff.eps', dpi=300, bbox_inches='tight')
+
+plt.close()
+
+# 100% Stacked Area Chart TM infra cost
+# Plot
+plt.figure(figsize=(8, 4))
+
+plt.stackplot(gen_infra_array, TM0_percent, TM1_percent, TM2_percent, TM3_percent, TM4_percent, labels=['NS < 0.2', '0.2 <= NS < 0.4', '0.4 <= NS < 0.6', '0.6 <= NS < 0.8', 'NS >= 0.8'], colors = colors)
+
+plt.axis([2, len(TM0_percent), 0, 100])
+
+plt.xlabel('Generations')
+plt.ylabel('Network Size')
+plt.title('Proportion paths affordance through generations')
+plt.legend(loc='upper right')
+
+plt.savefig(pathPC + '/100StackedPathAff.png', dpi=300, bbox_inches='tight')
+plt.savefig(pathUSB + '/100StackedPathAff.png', dpi=300, bbox_inches='tight')
+
+plt.show()
+
+# EPS
+plt.figure(figsize=(8, 4))
+plt.stackplot(gen_infra_array, TM0_percent, TM1_percent, TM2_percent, TM3_percent, TM4_percent, labels=['NS < 0.2', '0.2 <= NS < 0.4', '0.4 <= NS < 0.6', '0.6 <= NS < 0.8', 'NS >= 0.8'], colors = colors)
+
+plt.axis([2, len(TM0_percent), 0, 100])
+
+plt.xlabel('Generations', fontsize=fontsizeEPS)
+plt.ylabel('Paths system size (in px)', fontsize=fontsizeEPS)
+
+plt.savefig(pathPC + '/100StackedPathAff.eps', dpi=300, bbox_inches='tight')
+plt.savefig(pathUSB + '/100StackedPathAff.eps', dpi=300, bbox_inches='tight')
+
+plt.close()
+
+
+# plt.figure(figsize=(8, 4))
+
+# max_degree = 1
+
+# for i in range(1, 6):
+    
+    
+    
+    
+    
+#     curve_data = data[data['curve'] == f'Curve {i}']
+#     sns.lineplot(x='x', y='y', data=curve_data, label=f'Curve {i}')
+#     plt.fill_between(curve_data['x'], curve_data['y_lower'], curve_data['y_upper'], alpha=0.2)
+
+# plt.plot(running_mean, labels=['TM0', 'TM1', 'TM2', 'TM3', 'TM4'], colors = colors)
+
+# plt.xlabel('Generations')
+# plt.ylabel('Network Cost Per TM')
+# plt.title('100% Stacked Network Cost Per TM through generations')
+# plt.legend(loc='upper right')
